@@ -1,3 +1,1 @@
 # KandJobb
-
-kod
