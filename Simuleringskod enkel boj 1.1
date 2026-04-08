@@ -1,0 +1,161 @@
+%% Parametrar
+
+Cd = 1;
+p = 1000;
+k = 1e7;
+g = 9.82;
+
+% Bojen
+V_boj = 12;
+A_boj = 12.5;
+m_boj = 800;
+r_boj = [0; -10];        % Startposition boj
+v_boj = [0; 0];
+L0_2 = 40;
+U_strom_boj = [1; 0]; 
+
+% Bottenpunkt
+r_botten = [0; -50];   
+
+% Turbinen
+r_turbin = [0; 0];       % Startposition turbin
+V_turbin = 25;
+A_turbin = 7;
+m_turbin = 5000;
+v_turbin = [0; 0];
+U_strom_turbin = [3; 0]; 
+L0_1 = 11;
+
+%% Funktioner
+
+% Arkimedes princip
+function Fflyt = flyt(V)
+    p = 1000; g = 9.82;
+    Fflyt = [0; p * g * V];  
+end
+
+% Tyngdkraft
+function Ftyngd = tyngd(m)
+    g = 9.82;
+    Ftyngd = [0; -m * g];      
+end
+
+% Hookes lag
+function Flin = F_lin(r1, r0, L0, k)
+    d = r1 - r0;   
+    L = norm(d);
+    if L == 0
+        Flin = [0;0];
+        return
+    end
+    e = d / L;             
+    T = k * max(L - L0, 0);
+    Flin = -T * e;        
+end
+
+% Dragkraft (riktning korrekt)
+function Fdrag = F_drag(U_strom, v, A, Cd, p)
+    v_rel = U_strom - v;        
+    Fdrag = 0.5 * p * A * Cd * norm(v_rel) * v_rel;
+end
+
+%% Tidsinställningar
+dt = 0.01;
+t_max = 100;
+time = 0:dt:t_max;
+N = length(time);
+
+% Historik
+x_hist_boj = zeros(1, N);
+z_hist_boj = zeros(1, N);
+x_hist_turbin = zeros(1, N);
+z_hist_turbin = zeros(1, N);
+
+%% Simulering
+
+for i = 1:N
+    % --- Krafter på bojen ---
+    F_drag_boj = F_drag(U_strom_boj, v_boj, A_boj, Cd, p);
+    F_flyt_boj = flyt(V_boj);
+    F_tyngd_boj = tyngd(m_boj);
+    F_lin_1 = F_lin(r_boj, r_turbin, L0_1, k); 
+    F_lin_2 = F_lin(r_boj, r_botten, L0_2, k); 
+    F_tot_boj = F_flyt_boj + F_tyngd_boj + F_lin_1 + F_lin_2 + F_drag_boj;
+    
+    a_boj = F_tot_boj / m_boj;
+    v_boj = v_boj + a_boj * dt;
+    r_boj = r_boj + v_boj * dt;
+    
+    % --- Krafter på turbin ---
+    F_drag_turbin = F_drag(U_strom_turbin, v_turbin, A_turbin, Cd, p);
+    F_flyt_turbin = flyt(V_turbin);
+    F_tyngd_turbin = tyngd(m_turbin);
+    F_lin_turbin = F_lin(r_turbin, r_boj, L0_1, k); 
+    F_tot_turbin = F_flyt_turbin + F_tyngd_turbin + F_lin_turbin + F_drag_turbin;
+    
+    a_turbin = F_tot_turbin / m_turbin;
+    v_turbin = v_turbin + a_turbin * dt;
+    r_turbin = r_turbin + v_turbin * dt;
+    r_turbin(2) = min(r_turbin(2), 0);  % max yta = 0
+    
+    x_hist_boj(i) = r_boj(1);
+    z_hist_boj(i) = r_boj(2);
+    x_hist_turbin(i) = r_turbin(1);
+    z_hist_turbin(i) = r_turbin(2);
+end
+
+%% Plot bojen
+figure
+plot(time, x_hist_boj, 'b', 'LineWidth', 2)
+xlabel("Tid [s]"); ylabel("X [m]");
+title("Bojens rörelse i X-led"); grid on
+
+figure
+plot(time, z_hist_boj, 'b', 'LineWidth', 2)
+xlabel("Tid [s]"); ylabel("Z [m]");
+title("Bojens rörelse i Z-led"); grid on
+
+figure
+plot(time, x_hist_turbin, 'b', 'LineWidth', 2)
+xlabel("Tid [s]"); ylabel("X [m]");
+title("Turbinens rörelse i X-led"); grid on
+
+figure
+plot(time, z_hist_turbin, 'b', 'LineWidth', 2)
+xlabel("Tid [s]"); ylabel("Z [m]");
+title("Turbinens rörelse i Z-led"); grid on
+
+%% Animation
+
+r_boj = [0; -10]; 
+r_turbin = [0; 0]; 
+figure
+axis equal; grid on; hold on
+xlim([-20 20]); ylim([-60 10]);
+xlabel("X [m]"); ylabel("Z [m]");
+title("Animation av boj och linor")
+
+plot(r_botten(1), r_botten(2), 'ks', 'MarkerSize', 10, 'LineWidth', 2)
+
+h_boj = plot(0, 0, 'bo', 'MarkerSize', 10, 'LineWidth', 2);
+h_line1 = plot([0 0], [0 0], 'k--', 'LineWidth', 1.5); % botten → boj
+h_line2 = plot([0 0], [0 0], 'g--', 'LineWidth', 1.5); % boj → turbin
+h_turbin = plot(x_hist_turbin(1), z_hist_turbin(1), 'ro', 'MarkerSize', 10, 'LineWidth', 2);
+
+for i = 1:N
+    x_boj = x_hist_boj(i);
+    z_boj = z_hist_boj(i);
+    x_turbin = x_hist_turbin(i);
+    z_turbin = z_hist_turbin(i);
+    
+    % Uppdatera bojen
+    set(h_boj, 'XData', x_boj, 'YData', z_boj);
+    % Uppdatera linor
+    set(h_line1, 'XData', [r_botten(1), x_boj], 'YData', [r_botten(2), z_boj]);
+    set(h_line2, 'XData', [x_boj, x_turbin], 'YData', [z_boj, z_turbin]);
+    % Uppdatera turbinen
+    set(h_turbin, 'XData', x_turbin, 'YData', z_turbin);
+    
+    drawnow
+    pause(0.01)
+end
