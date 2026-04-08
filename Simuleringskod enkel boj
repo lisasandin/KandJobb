@@ -1,0 +1,129 @@
+k = 1e5;
+V_boj = 12;
+m_boj = 800;
+r_boj = [0; -9];       % bojens position
+v_boj = [0; 0];
+L0_2 = 40;
+
+r_botten = [0; -50];   % bottenpunkt
+
+r_turbin = [5; 0];     % Turbinens position
+L0_1 = 10;
+
+function Fflyt = flyt(V)
+    p = 1000;
+    g = 9.82;
+    Fflyt = [0; p * g * V];  
+end
+
+function Ftyngd = tyngd(m)
+    g = 9.82;
+    Ftyngd = [0; -m * g];      
+end
+
+
+
+function Flin = F_lin(r1, r0, L0, k)
+
+    d = r1 - r0;   
+    L = norm(d);            
+
+    e = d / L;             
+
+    T = k * max(L - L0, 0);
+
+    Flin = -T * e;        
+end
+
+
+
+dt = 0.01;
+t_max = 20;
+time = 0:dt:t_max;
+
+
+z_hist = [];
+x_hist = [];
+
+for t = time
+
+    F_flyt = flyt(V_boj);
+    F_tyngd = tyngd(m_boj);
+
+    F_lin_1 = F_lin(r_boj, r_turbin, L0_1, k);
+    F_lin_2 = F_lin(r_boj, r_botten, L0_2, k);
+
+    F_tot = F_flyt + F_tyngd + F_lin_1 + F_lin_2;
+
+    a = F_tot / m_boj;
+
+    v_boj = v_boj + a * dt;
+    r_boj = r_boj + v_boj * dt;
+    
+    x_hist(end+1) = r_boj(1);
+    z_hist(end+1) = r_boj(2);
+
+end
+
+figure
+
+plot(time, x_hist, 'b', 'LineWidth', 2)
+
+ylabel("X [m]")
+xlabel("Tid [s]")
+
+title("Bojens rörelse i (x, tid)")
+grid on
+
+figure
+
+plot(time, z_hist, 'b', 'LineWidth', 2)
+
+ylabel("Z [m]")
+xlabel("Tid [s]")
+
+title("Bojens rörelse i (z, tid)")
+grid on
+
+figure
+axis equal
+grid on
+hold on
+
+xlim([-20 20])
+ylim([-60 10])
+
+xlabel("X [m]")
+ylabel("Z [m]")
+title("Animation av boj och linor")
+
+% Rita fasta punkter
+plot(r_botten(1), r_botten(2), 'ks', 'MarkerSize', 10, 'LineWidth', 2)
+plot(r_turbin(1), r_turbin(2), 'ro', 'MarkerSize', 10, 'LineWidth', 2)
+
+% Initiera grafikobjekt
+h_boj = plot(0, 0, 'bo', 'MarkerSize', 10, 'LineWidth', 2);
+h_line1 = plot([0 0], [0 0], 'k--', 'LineWidth', 1.5);
+h_line2 = plot([0 0], [0 0], 'g--', 'LineWidth', 1.5);
+
+for i = 1:length(time)
+
+    % Bojens position
+    x = x_hist(i);
+    z = z_hist(i);
+
+    % Uppdatera boj
+    set(h_boj, 'XData', x, 'YData', z);
+
+    % Lina botten → boj
+    set(h_line1, 'XData', [r_botten(1), x], ...
+                 'YData', [r_botten(2), z]);
+
+    % Lina boj → turbin
+    set(h_line2, 'XData', [x, r_turbin(1)], ...
+                 'YData', [z, r_turbin(2)]);
+
+    drawnow
+
+    pause(0.01)  % styr hastighet
+end
