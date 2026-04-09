@@ -22,22 +22,15 @@ x_hist = [];
 
 
 % Solve IVP
-y0 = [r_boj; v_boj];
-f_handle = @(t, y) f(t, y, V_boj, m_boj, r_turbin, r_botten, L0_1, L0_2, k_fjader);
+y0 = [r_boj; v_boj];    % [x; z; vx; vz] 
+f_handle = @(t, y) f(t, y, V_boj, m_boj, r_turbin, r_botten, L0_1, L0_2, k_fjader); % packar in alla konstanter så RK4 kan anropas
 [t, y_out] = rk4(f_handle, tspan, y0, h);
 
 x_hist = y_out(:, 1);
 z_hist = y_out(:, 2);
 
-% Print table of solutions
-fprintf("   t  |  y\n-------------------\n")
-for n = 1:length(t)
-    fprintf(" %4.2f | %8.6f\n", t(n), y_out(n,1))
-end
 
-
-
-function Fflyt = flyt(V)
+function Fflyt = flyt(V)  % Varje kraft är en 2x1 vektor med [x-komponent; z-komponent]
     p = 1000;
     g = 9.82;
     Fflyt = [0; p * g * V];  
@@ -49,22 +42,19 @@ function Ftyngd = tyngd(m)
 end
 
 function Flin = F_lin(r1, r0, L0, k)
-    r1 = r1(:);
-    r0 = r0(:);
-    d = r1 - r0;   
-    L = norm(d);            
-
-    e = d / L;             
-
-    T = k * max(L - L0, 0);
-
-    Flin = -T * e;        
+    r1 = r1(:); 
+    r0 = r0(:);   
+    d = r1 - r0;  % vektor från fäste till boj
+    L = norm(d);  % linans nuvarande längd           
+    e = d / L;    % enhetsvektorn (riktning)             
+    T = k * max(L - L0, 0);   % kraft bara om linan är spänd
+    Flin = -T * e;  % drar mot fästet
 end
 
 % ODE
 function dydt = f(t, y, V_boj, m_boj, r_turbin, r_botten, L0_1, L0_2, k)
-    r = y(1:2)';
-    v = y(3:4)';
+    r = y(1:2)';   % position [x; z]
+    v = y(3:4)';   % hastighet [vx; vz]
 
     F_flyt = flyt(V_boj);
     F_tyngd = tyngd(m_boj);
@@ -74,8 +64,8 @@ function dydt = f(t, y, V_boj, m_boj, r_turbin, r_botten, L0_1, L0_2, k)
     F_tot = F_flyt + F_tyngd + F_lin_1 + F_lin_2;
     a = F_tot /m_boj;
 
-    dydt= [v; a];
-    dydt = dydt(:)';
+    dydt= [v; a];   % [dx/dt; dz/dt; dvx/dt; dvz/dt] Kolumnvektor
+    dydt = dydt(:)';    % gör om till radvektor för RK4
    
 end
 
