@@ -1,42 +1,43 @@
 %% Parametrar
 
-Cd = 1;
-p = 1000;
-k = 1e5;
-g = 9.82;
+Cd = 1;      % Dragkoefficient
+p = 1000;    % Densitet
+k = 1e5;     % Fjäderkonstant
+g = 9.82;    %
 
 % Bojen
-V_boj = 12;
-A_boj = 12.5;
-m_boj = 800;
-r_boj = [0; -10];        % Startposition boj
-v_boj = [0; 0];
-L0_2 = 40;
-U_strom_boj = [0.2; 0]; 
+V_boj = 12;            % Volym
+A_boj = 12.5;          % Ytaarea som strömmen träffar
+m_boj = 800;           % Massa
+r_boj = [0; -10];      % Startposition boj
+v_boj = [0; 0];        % Starthastighet boj
+L0_2 = 40;             % Lina 2 längd i viloläge
+U_strom_boj = [0.2; 0];   % Strömmen på bojen, konstant just nu
 
 % Bottenpunkt
-r_botten = [0; -50];   
+r_botten = [0; -50];   % Havets djup
 
 % Turbinen
-r_turbin = [0; 0];       % Startposition turbin
-V_turbin = 25;
-A_turbin = 7;
-m_turbin = 5000;
-v_turbin = [0; 0];
-U_strom_turbin = [0.4; 0]; 
-L0_1 = 10;
+r_turbin = [0; 0];    % Startposition turbin
+V_turbin = 25;        % Volym       
+A_turbin = 7;         % Ytarea som strömmen träffas
+m_turbin = 5000;      % Massa
+v_turbin = [0; 0];    % Starthastighet
+U_strom_turbin = [0.4; 0];   % Strömmen på turbinen
+L0_1 = 10;            % Längd på lina 1 i viloläga
 
 
 %% Simulering
 
-h = 0.01;
-t_max = 100;
-tspan = [0, t_max];
+h = 0.01;             % Tidssteg
+t_max = 100;          % Tid på simulering
+tspan = [0, t_max]; 
 
 % Tillståndsvektor:
 % y = [x_boj; z_boj; vx_boj; vz_boj; x_turbin; z_turbin; vx_turbin; vz_turbin]
 y0 = [r_boj; v_boj; r_turbin; v_turbin];
 
+% Funktion som tar med alla parametrar i RK4
 f_handle = @(t, y) f(t, y, V_boj, m_boj, V_turbin, m_turbin, ...
                      r_botten, L0_1, L0_2, k, ...
                      U_strom_boj, U_strom_turbin, ...
@@ -44,6 +45,7 @@ f_handle = @(t, y) f(t, y, V_boj, m_boj, V_turbin, m_turbin, ...
 
 [t, y_out] = rk4(f_handle, tspan, y0, h);
 
+% Lista för att spara all data att plotta
 x_hist_boj    = y_out(:, 1);
 z_hist_boj    = y_out(:, 2);
 x_hist_turbin = y_out(:, 5);
