@@ -1,0 +1,286 @@
+%% Parametrar
+
+Cd = 1;             % Dragkoefficient
+p_vatten = 1025;    % Densitet havsvatten
+p_luft = 1;         % Densitet luft
+k = 1e5;            % Fjäderkonstant
+max_F = 2e6;        % Max kraft i linan
+g = 9.82;           % 
+D = 30;             % Hur havstrom varierar 
+U0 = 0.5;           % Ström vid havsytan
+U10 = 15;           % Vindhastighet vid 10 m över ytan
+b = 0.125;
+Cs = 1.2;
+
+% Bojen
+bredd_boj = 3;   % bojens bredd [m] 
+hojd_boj = 3;    % bojens höjd  [m] 
+djup_boj = 3;    % bojens djup  [m]  
+horn_boj = [ -bredd_boj/2,  bredd_boj/2, bredd_boj/2, -bredd_boj/2;   % x-koordinater boj utgår från centrum
+             -hojd_boj/2, -hojd_boj/2, hojd_boj/2,  hojd_boj/2 ];     % z-koordinater boj
+
+m_boj = 1e4;                                % Massa [kg]
+V_boj = bredd_boj * hojd_boj * djup_boj;    % Volym
+A_boj = hojd_boj * djup_boj;                % Ytaarea som strömmen träffar
+
+r_boj = [0; -12];                           % Startposition  
+mc_boj_local = [0; 0];                      % masscentrum boj
+
+v_boj = [0; 0];                             % Starthastighet boj
+L0_2 = 35;                                  % Lina 2 längd i viloläge
+
+% faktiska position på bojens hörn i världen
+horn_varld_boj = horn_boj + r_boj;
+
+% rotation boj
+bredd_boj = abs(horn_boj(1,2) - horn_boj(1,1));
+hojd_boj  = abs(horn_boj(2,3) - horn_boj(2,1));
+I_boj = m_boj/12 * (bredd_boj^2 + hojd_boj^2);  % tröghetsmoment
+theta_boj = 0;
+omega_boj = 0;
+
+% Bottenpunkt
+r_botten = [0; -50];   % Havets djup
+
+N_seg = 5;
+
+% Turbinen
+bredd_turbin = 3;   % turbinens bredd [m] 
+hojd_turbin = 20;    % turbinens höjd  [m] 
+djup_turbin = 3;    % Samma som turbinens höjd [m]  
+horn_turbin = [ -bredd_turbin/2,  bredd_turbin/2, bredd_turbin/2, -bredd_turbin/2;   % x-koordinater boj utgår från centrum
+             -hojd_turbin/2, -hojd_turbin/2, hojd_turbin/2,  hojd_turbin/2 ];     % z-koordinater boj
+
+r_turbin = [0; 5.5];    % Startposition och mitten
+mc_turbin_local = [0; -8]; % Masscentrum lokalt, mc turbin
+%V_turbin = bredd_turbin*djup_turbin*hojd_tubin;        % Volym       
+%A_turbin = 7;         % Ytarea som strömmen träffas
+m_turbin = 40000;      % Massa
+v_turbin = [0; 0];    % Starthastighet
+L0_1 = 12;            % Längd på lina 1 i viloläga
+I_turbin = m_turbin/12 * (bredd_turbin^2 + hojd_turbin^2);  % Tröghetsmoment
+theta_turbin = 0; % Vinkel          (Runt y-axeln)
+omega_turbin = 0; % Vinkelhatighet (runt y-axeln)
+
+% faktiska position på bojens hörn i världen
+horn_varld_turbin = horn_turbin + r_turbin;
+
+%% Simulering
+
+h = 0.001;             % Tidssteg
+t_max = 200;          % Tid på simulering
+tspan = [0, t_max]; 
+
+% Tillståndsvektor:
+% y = [x_boj; z_boj; vx_boj; vz_boj; x_turbin; z_turbin; theta; vx_turbin; vz_turbin; omega]
+y0 = [r_boj; theta_boj; v_boj; omega_boj; r_turbin; theta_turbin; v_turbin; omega_turbin];
+
+f_handle = @(t, y) f(t, y, V_boj, m_boj, bredd_turbin, djup_turbin, hojd_turbin, m_turbin, mc_turbin_local, ...
+                     r_botten, L0_1, L0_2, k, ...
+                     U0, D, U10, b, N_seg, ...
+                     A_boj, Cd, p_luft, p_vatten, Cs, horn_boj, horn_turbin,...
+                     mc_boj_local);
+
+[t, y_out] = rk4(f_handle, tspan, y0, h);
+
+% Lista för att spara all data att plotta
+x_hist_boj    = y_out(:, 1);
+z_hist_boj    = y_out(:, 2);
+x_hist_turbin = y_out(:, 7);
+z_hist_turbin = y_out(:, 8);
+theta_hist    = y_out(:, 9);
+theta_boj_hist    = y_out(:, 3);
+
+%% Simulering krafter och kraftpunkter
+%N_seg = 5;
+N = length(t);
+Flin1_hist = zeros(N, 2);
+Flin2_hist = zeros(N, 2);
+Fvind_hist = zeros(N, 2);
+Fstrom_hist = zeros(N, 2);
+r_seg_hist = zeros(N, N_seg, 2);
+centroid_hist = zeros(N, 2);
+dragpoint_hist = zeros(N, 2);
+mc_turbin_hist = zeros(N, 2);
+
+
+for i = 1:N
+
+    r_boj    = y_out(i, 1:2)';
+    r_turbin = y_out(i, 7:8)';
+    theta_boj = y_out(i, 3);   % bojen roterar
+    theta_turbin = y_out(i, 9);
+    v_turbin     = y_out(i, 10:11)';
+
+
+    R_boj = [cos(theta_boj), sin(theta_boj);
+             -sin(theta_boj),  cos(theta_boj)];
+
+    R_turbin = [cos(theta_turbin), sin(theta_turbin);
+                -sin(theta_turbin),  cos(theta_turbin)];
+
+    % Rotation och translation
+    horn_varld_boj    = R_boj * horn_boj + r_boj;
+    horn_varld_turbin = R_turbin * horn_turbin + r_turbin;
+     
+    % MC (masscentrum i världen)
+    mc_turbin = r_turbin + R_turbin * mc_turbin_local;
+    mc_turbin_hist(i,:) = mc_turbin';
+
+    % Kraftpunkter
+
+    % Segmentens punkter
+    [Fvind_hist(i,:) , ~, r_seg_i] = vind_segment(N_seg, horn_varld_turbin, djup_turbin, v_turbin, U10, b, theta_turbin, p_luft, Cs, mc_turbin);
+
+    n = size(r_seg_i, 2);
+    if n > 0
+        r_seg_hist(i, 1:n, :) = r_seg_i';
+    end
+
+    % Bojens linfästen
+    r_horn_1_boj = (horn_varld_boj(:,1) + horn_varld_boj(:,2)) / 2;
+    r_horn_2_boj = (horn_varld_boj(:,3) + horn_varld_boj(:,4)) / 2;
+
+    % Turbinens linfäste
+    r_horn_1_turbin = (horn_varld_turbin(:,1) + horn_varld_turbin(:,2)) / 2;
+
+     % Aproximativ area mot ström
+        % Aproximativ area mot ström
+    submerged_h = abs(horn_varld_turbin(2,2));
+
+    A_turbin_submerged = submerged_h * djup_turbin;
+    A_turbin_submerged_eff = A_turbin_submerged*abs(cos(theta_turbin));
+
+
+    [centroid_i, V_turbin, drag_point_i] = centroid_volym_dragpoint(horn_varld_turbin, djup_turbin);
+    
+    
+    % Beräkna ström vid det aktuella djupet
+    U_strom_turbin = strom(centroid_i(2), U0, D);
+    centroid_hist(i,:) = centroid_i;
+    dragpoint_hist(i,:) = drag_point_i;
+
+
+    % Krafter på turbinen
+    Fdrag_turbin_strom  = F_drag(U_strom_turbin, v_turbin, A_turbin_submerged_eff, Cd, p_vatten);
+
+
+
+    % Krafter p
+    Fstrom_hist(i,:)  = F_drag(U_strom_turbin, v_turbin, A_turbin_submerged_eff, Cd, p_vatten);
+
+    % Krafter
+    Flin1_hist(i,:) = F_lin(r_horn_1_turbin, r_horn_2_boj, L0_1, k)';
+    Flin2_hist(i,:) = F_lin(r_horn_1_boj, r_botten,        L0_2, k)';
+
+end
+
+
+
+%% Animation
+
+function color = force_to_color(F, max_F)
+    ratio = min(norm(F) / max_F, 1);
+
+    if ratio < 0.5
+        t = ratio / 0.5;
+        color = [t, 1, 0];
+    else
+        t = (ratio - 0.5) / 0.5;
+        color = [1, 1 - t, 0];
+    end
+end
+
+N = length(t);
+
+figure
+axis equal; grid on; hold on
+xlim([-30 30]); ylim([-60 30]);
+x_limits = xlim;
+y_limits = ylim;
+
+h_water = patch( ...
+    [x_limits(1), x_limits(2), x_limits(2), x_limits(1)], ...
+    [y_limits(1), y_limits(1), 0, 0], ...
+    [0.6 0.8 1], ... 
+    'EdgeColor', 'none', ...
+    'FaceAlpha', 0.4); 
+xlabel("X [m]"); ylabel("Z [m]");
+title("Animation av boj och linor")
+
+plot(r_botten(1), r_botten(2), 'ks', 'MarkerSize', 10, 'LineWidth', 2)
+
+h_boj = patch(horn_varld_boj(1,:), horn_varld_boj(2,:), 'b', 'FaceAlpha', 0.5);
+h_line1 = plot([r_botten(1), x_hist_boj(1)], [r_botten(2), z_hist_boj(1)], 'g', 'LineWidth', 2);
+h_line2 = plot([x_hist_boj(1), x_hist_turbin(1)], [z_hist_boj(1), z_hist_turbin(1)], 'g', 'LineWidth', 2);
+h_turbin = patch(horn_varld_turbin(1,:), horn_varld_turbin(2,:), 'r', 'FaceAlpha', 0.5);
+h_mc = plot(0, 0, 'ko', 'MarkerSize', 6, 'MarkerFaceColor', 'k');
+h_centroid = plot(0, 0, 'mo', 'MarkerSize', 6, 'MarkerFaceColor', 'm');
+%h_seg_pts = scatter([], [], 40, 'c', 'filled');
+% h_dragpoint = plot(0, 0, 'mo', 'MarkerSize', 6, 'MarkerFaceColor', 'm');
+
+h_time = text(-28, 25, "t = 0.00 s", ...
+    "FontSize", 12, "FontWeight", "bold");
+
+for i = 1:20:N
+    x_boj    = x_hist_boj(i);
+    z_boj    = z_hist_boj(i);
+    x_turbin = x_hist_turbin(i);
+    z_turbin = z_hist_turbin(i);
+    theta    = theta_hist(i);
+    theta_boj = theta_boj_hist(i);
+    Flin1 = Flin1_hist(i);
+    Flin2 = Flin2_hist(i);
+    centroid = centroid_hist(i,:)';
+    mc_turbin = mc_turbin_hist(i,:)';
+    drag_point = dragpoint_hist(i,:)';
+
+    R = [cos(theta), sin(theta);
+         -sin(theta),  cos(theta)];
+
+    R_boj = [cos(theta_boj), sin(theta_boj);
+         -sin(theta_boj),  cos(theta_boj)];
+
+    horn_varld_boj    = R_boj * horn_boj + [x_boj; z_boj];
+    horn_varld_turbin = R * horn_turbin + [x_turbin; z_turbin];  % roteras
+
+    % r_s = squeeze(r_seg_hist(i, :, :));      % N_seg × 2
+    % valid = any(r_s ~= 0, 2);
+    % r_s = r_s(valid, :);
+    % 
+    % if ~isempty(r_s)
+    %     set(h_seg_pts, 'XData', r_s(:,1), 'YData', r_s(:,2));
+    % else
+    %     set(h_seg_pts, 'XData', [], 'YData', []);
+    % end
+
+
+    % Ändra färg beroende på kraft
+    color1 = force_to_color(Flin1, max_F);
+    color2 = force_to_color(Flin2, max_F);
+
+
+    mitten_ovre_boj     = (horn_varld_boj(:,3)    + horn_varld_boj(:,4))    / 2;
+    mitten_undre_boj    = (horn_varld_boj(:,1)    + horn_varld_boj(:,2))    / 2;
+    mitten_undre_turbin = R * (horn_turbin(:,1) + horn_turbin(:,2)) / 2 + [x_turbin; z_turbin];
+
+    set(h_boj,    'XData', horn_varld_boj(1,:),    'YData', horn_varld_boj(2,:));
+    set(h_turbin, 'XData', horn_varld_turbin(1,:), 'YData', horn_varld_turbin(2,:));
+    set(h_line1,  'XData', [mitten_ovre_boj(1), mitten_undre_turbin(1)], ...
+              'YData', [mitten_ovre_boj(2), mitten_undre_turbin(2)], ...
+              'Color', color1, 'LineWidth', 2);
+    set(h_line2,  'XData', [r_botten(1), mitten_undre_boj(1)], ...
+                  'YData', [r_botten(2), mitten_undre_boj(2)], ...
+                  'Color', color2, 'LineWidth', 2);
+    set(h_mc, 'XData', mc_turbin(1), 'YData', mc_turbin(2));
+    set(h_centroid, 'XData', centroid(1), 'YData', centroid(2));
+    %set(h_dragpoint, 'XData', drag_point(1), 'YData', drag_point(2));
+   
+   
+
+    set(h_time, 'String', sprintf('t = %.2f s', t(i)));
+
+    drawnow
+pause(h * 10)
+end
+
