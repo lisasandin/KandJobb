@@ -1,0 +1,171 @@
+%% =========================================================
+%  SPARBUOY – Geometri, massa, tröghet och visualisering
+
+%  Parametrar:
+%    float_D    = floaterns diameter                     (störst)
+%    spar_D     = sparets diameter vid FLOATERBOTTEN     (mellanstor)
+%    sparbase_D = sparbasens diameter vid BALLASTTOPPEN  (minst av konerna)
+%    sumarin_D  = ballastens diameter                    (kan vara = sparbase_D)
+%
+%  Lokalt koordinatsystem: z=0 i BOTTEN av hela strukturen, z uppåt.
+% =========================================================
+
+%% --- Geometriparametrar ---
+float_D      =  7;   % [m] Floater diameter                    (störst)
+float_h      =  7;   % [m] Floater höjd
+spartop_h    =  5;   % [m] Spar (övre kon) höjd
+spar_D       =  4;   % [m] Sparets diameter vid floaterbotten  (smalare än float)
+sparbase_D   =  2;   % [m] Sparbasens diameter vid ballasttopp (smalare än spar)
+spar_h       = 15;   % [m] Sparbase (nedre kon) höjd
+sumarin_D    =  4;   % [m] Ballastens diameter  (= sparbase_D för snygg övergång)
+sumarin_h    =  2;   % [m] Ballasthöjd
+
+rho_wood    =  600;  % [kg/m³] Trä
+rho_float   =  200;  % [kg/m³] Floater
+rho_ballast = 2400;  % [kg/m³] Betong
+p_vatten    = 1025;
+g           = 9.82;
+
+H_tot = sumarin_h + spar_h + spartop_h + float_h;
+
+%% --- z-koordinater för varje segments BOTTEN ---
+z_bot_ballast  = 0;
+z_bot_sparbase = sumarin_h;
+z_bot_spar     = sumarin_h + spar_h;
+z_bot_float    = sumarin_h + spar_h + spartop_h;
+
+%% --- Ballast: cylinder ---
+%    R = sumarin_D/2 hela höjden
+[V_ballast, m_ballast, zc_ballast_loc, I_xx_ballast, I_zz_ballast] = ...
+    segment_cylinder(sumarin_D/2, sumarin_h, rho_ballast);
+zc_ballast = z_bot_ballast + zc_ballast_loc;
+
+%% --- Sparbase: trunkerad kon, smalnar nedåt ---
+%    Botten (vid ballast): R = sparbase_D/2  (liten)
+%    Topp   (vid spar):    R = spar_D/2      (stor)
+[V_sparbase, m_sparbase, zc_sparbase_loc, I_xx_sparbase, I_zz_sparbase] = ...
+    segment_frustum(sparbase_D/2, spar_D/2, spar_h, rho_wood);
+zc_sparbase = z_bot_sparbase + zc_sparbase_loc;
+
+%% --- Spar: trunkerad kon, smalnar nedåt ---
+%    Botten (vid sparbase): R = spar_D/2    (liten)
+%    Topp   (vid floater):  R = float_D/2   (stor)
+[V_spar, m_spar, zc_spar_loc, I_xx_spar, I_zz_spar] = ...
+    segment_frustum(spar_D/2, float_D/2, spartop_h, rho_wood);
+zc_spar = z_bot_spar + zc_spar_loc;
+
+%% --- Floater: cylinder ---
+%    R = float_D/2 hela höjden
+[V_float, m_float, zc_float_loc, I_xx_float, I_zz_float] = ...
+    segment_cylinder(float_D/2, float_h, rho_float);
+zc_float = z_bot_float + zc_float_loc;
+
+%% --- Total massa och masscentrum ---
+m_tot = m_ballast + m_sparbase + m_spar + m_float;
+
+zc_tot = (m_ballast*zc_ballast + m_sparbase*zc_sparbase + ...
+          m_spar*zc_spar       + m_float*zc_float) / m_tot;
+
+fprintf('=== Sparboj Massanalys ===\n')
+fprintf('m_ballast  = %8.1f kg  (zc = %.2f m från botten)\n', m_ballast,  zc_ballast)
+fprintf('m_sparbase = %8.1f kg  (zc = %.2f m från botten)\n', m_sparbase, zc_sparbase)
+fprintf('m_spar     = %8.1f kg  (zc = %.2f m från botten)\n', m_spar,     zc_spar)
+fprintf('m_float    = %8.1f kg  (zc = %.2f m från botten)\n', m_float,    zc_float)
+fprintf('m_total    = %8.1f kg\n', m_tot)
+fprintf('zc_total   = %.2f m från botten  (= %.2f m från mitten)\n', zc_tot, zc_tot - H_tot/2)
+
+%% --- Tröghet ---
+I_pitch_tot = steiner(I_xx_ballast,  m_ballast,  zc_ballast  - zc_tot) + ...
+              steiner(I_xx_sparbase, m_sparbase, zc_sparbase - zc_tot) + ...
+              steiner(I_xx_spar,     m_spar,     zc_spar     - zc_tot) + ...
+              steiner(I_xx_float,    m_float,    zc_float    - zc_tot);
+
+I_yaw_tot = I_zz_ballast + I_zz_sparbase + I_zz_spar + I_zz_float;
+
+fprintf('\nI_pitch = %.3e kg·m²\n', I_pitch_tot)
+fprintf('I_yaw   = %.3e kg·m²\n',  I_yaw_tot)
+
+%% --- Statisk kraftbalans ---
+freeboard       = 1.0;
+V_sub_float     = pi*(float_D/2)^2 * (float_h - freeboard);
+V_submerged_tot = V_ballast + V_sparbase + V_spar + V_sub_float;
+
+F_buoy  = p_vatten * g * V_submerged_tot;
+F_grav  = m_tot * g;
+F_netto = F_buoy - F_grav;
+
+fprintf('\n=== Statisk Kraftbalans ===\n')
+fprintf('Flytkraft  = %.2e N\n', F_buoy)
+fprintf('Tyngd      = %.2e N\n', F_grav)
+fprintf('Netto      = %.2e N  (%s)\n', F_netto, ternary(F_netto>0,'flyter upp','sjunker'))
+
+%% --- Värden att klistra in i simuleringskoden ---
+mc_local_z = zc_tot - H_tot/2;
+fprintf('\n=== Klistra in i simuleringskoden ===\n')
+fprintf('m_turbin          = %.1f;\n',       m_tot)
+fprintf('mc_turbin_local   = [0; %.4f];\n',  mc_local_z)
+fprintf('I_turbin          = %.4e;\n',        I_pitch_tot)
+fprintf('hojd_turbin       = %.1f;\n',        H_tot)
+fprintf('diameter_turbin   = %.1f;   %% float_D (max diameter)\n', float_D)
+fprintf('V_turbin_nedsankt = %.4f;   %% vid freeboard = %.1f m\n', V_submerged_tot, freeboard)
+
+%% --- Visualisering ---
+figure('Name','Sparboj – Tvärsnitt','Color','w')
+hold on; grid on; axis equal
+
+%  plot_seg(R_bot, R_top, z_bot, z_top, färg, etikett)
+plot_seg(float_D/2,    float_D/2,    z_bot_float,    z_bot_float    + float_h,   [0.20 0.60 1.00], 'Floater')
+plot_seg(spar_D/2,     float_D/2,    z_bot_spar,     z_bot_spar     + spartop_h, [0.10 0.40 0.80], 'Spar')
+plot_seg(sparbase_D/2, spar_D/2,     z_bot_sparbase, z_bot_sparbase + spar_h,    [0.05 0.25 0.60], 'Sparbase')
+plot_seg(sumarin_D/2,  sumarin_D/2,  z_bot_ballast,  z_bot_ballast  + sumarin_h, [0.40 0.20 0.05], 'Ballast')
+
+
+% Masscentrum
+plot(0, zc_tot, 'ko', 'MarkerSize', 6, 'MarkerFaceColor', 'k');
+text(float_D/2 + 0.2, zc_tot, sprintf('  MC (%.1f m från botten)', zc_tot), 'FontSize', 9)
+
+
+
+xlabel('x [m]'); ylabel('z [m]')
+title('Sparboj – Tvärsnitt')
+legend('Location','southeast')
+
+%% =========================================================
+%  HJÄLPFUNKTIONER
+% =========================================================
+
+function [V, m, zc, I_xx, I_zz] = segment_cylinder(R, h, rho)
+    V    = pi * R^2 * h;
+    m    = rho * V;
+    zc   = h / 2;
+    I_xx = m/12 * (3*R^2 + h^2);
+    I_zz = m/2  * R^2;
+end
+
+function [V, m, zc, I_xx, I_zz] = segment_frustum(R_bot, R_top, h, rho)
+    % R_bot = radie vid botten, R_top = radie vid toppen, z uppåt
+    V  = pi*h/3 * (R_bot^2 + R_bot*R_top + R_top^2);
+    m  = rho * V;
+    % Centroid från botten (exakt, eq. 16)
+    zc = h/4 * (R_bot^2 + 2*R_bot*R_top + 3*R_top^2) / ...
+               (R_bot^2 +   R_bot*R_top +   R_top^2);
+    % Pitch-tröghet runt eget mc (approximation med medelradie)
+    R_m  = (R_bot + R_top) / 2;
+    I_xx = m/12 * (3*R_m^2 + h^2);
+    % Yaw
+    I_zz = m/2 * (R_bot^2 + R_top^2) / 2;
+end
+
+function I_out = steiner(I_mc, m, d)
+    I_out = I_mc + m * d^2;
+end
+
+function plot_seg(R_bot, R_top, z_bot, z_top, col, lbl)
+    x = [-R_bot,  R_bot,  R_top, -R_top];
+    z = [ z_bot,  z_bot,  z_top,  z_top];
+    fill(x, z, col, 'FaceAlpha', 0.7, 'EdgeColor', 'k', 'DisplayName', lbl)
+end
+
+function s = ternary(cond, a, b)
+    if cond; s = a; else; s = b; end
+end
