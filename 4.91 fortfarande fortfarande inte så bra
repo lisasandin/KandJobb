@@ -1,0 +1,635 @@
+%% Parametrar
+
+Cd = 1;             % Dragkoefficient
+p_vatten = 1025;    % Densitet havsvatten
+p_luft = 1;         % Densitet luft
+k = 1e5;            % Fjäderkonstant
+max_F = 2e6;        % Max kraft i linan
+g = 9.82;           
+D = 30;             % Hur havström varierar 
+U0 = 0.5;           % Ström vid havsytan
+U10 = 15;           % Vindhastighet vid 10 m över ytan
+b = 0.125;
+Cs = 1.2;
+Ca = 1;
+N_seg = 10;
+
+%% Parametrar bojen
+hojd_boj    = 6;
+diameter_boj = 3;
+horn_boj = [ -diameter_boj/2,  diameter_boj/2, diameter_boj/2, -diameter_boj/2;
+             -hojd_boj/2,      -hojd_boj/2,     hojd_boj/2,     hojd_boj/2 ];
+% Hörn-index: 1=nedre-vänster, 2=nedre-höger, 3=övre-höger, 4=övre-vänster
+
+m_boj  = 1e4;
+V_boj  = pi * hojd_boj * (diameter_boj/2)^2;
+A_boj  = hojd_boj * diameter_boj;
+
+mc_boj_local = [0; 0];
+v_boj        = [0; 0];
+L0_2         = 20;   % Lina 2: boj → botten
+L0_1         = 20;   % Lina 1: boj → sparboj
+r_botten     = [0; -60];
+
+I_boj     = m_boj/12 * (3*(diameter_boj/2)^2 + hojd_boj^2);
+theta_boj = 0;
+omega_boj = 0;
+
+F_netto  = p_vatten*g*V_boj - m_boj*g;
+r_boj_z  = r_botten(2) + L0_2 + F_netto/k + hojd_boj/2;
+r_boj    = [0; r_boj_z];
+
+horn_varld_boj = horn_boj + r_boj;
+
+%% Parametrar turbinen + sparbojen som en rigid kropp
+
+% --- Turbinens huvudkropp ---
+hojd_turbin     = 20;
+diameter_turbin = 3;
+
+% Hörn: 1=nedre-vänster, 2=nedre-höger, 3=övre-höger, 4=övre-vänster
+horn_turbin_box = [ -diameter_turbin/2,  diameter_turbin/2, diameter_turbin/2, -diameter_turbin/2;
+                    -hojd_turbin/2,      -hojd_turbin/2,     hojd_turbin/2,     hojd_turbin/2 ];
+
+m_turbin_box        = 35000;
+mc_turbin_box_local = [0; 4];
+I_turbin_box        = m_turbin_box/12 * (3*(diameter_turbin/2)^2 + hojd_turbin^2);
+
+% --- Sparbojen (uppifrån och ned: float → spartop → sparbase → ballast) ---
+% Dimensioner
+float_D    = 6;   % floatens diameter
+float_h    = 5;   % floatens höjd
+spartop_h  = 2;   % koniskt segment float→spar
+spar_D     = 3;   % sparmastens diameter
+sparbase_D = 2;   % sparmastens basdiameter (smalare nertill)
+spar_h     = 4;   % sparmastens höjd
+sumarin_D  = 5;   % ballastens diameter
+sumarin_h  = 3;   % ballastens höjd
+
+D_medel = medel_diameter_spar(float_D, float_h, spartop_h, spar_D, sparbase_D, spar_h, sumarin_D, sumarin_h);
+
+rho_wood    = 600;
+rho_float   = 200;
+rho_ballast = 2400;
+
+% Höjder räknat från sparbojens lokala BOTTEN (z=0 vid botten, z=H_tot vid toppen)
+H_tot = sumarin_h + spar_h + spartop_h + float_h;  
+
+% Segment nedifrån och upp:
+%   [0        , sumarin_h]              → ballast  (cylinder, sumarin_D)
+%   [sumarin_h, sumarin_h+spar_h]       → sparbase (frustum, sparbase_D → spar_D)
+%   [sumarin_h+spar_h, ..+spartop_h]    → spartop  (frustum, spar_D → float_D)
+%   [.., H_tot]                         → float    (cylinder, float_D)
+z0_ballast = 0;
+z0_spar    = sumarin_h;
+z0_spartop = sumarin_h + spar_h;
+z0_float   = sumarin_h + spar_h + spartop_h;
+
+[V_ballast,  m_ballast,  zc_ballast_loc,  I_xx_ballast,  ~] = segment_cylinder(sumarin_D/2, sumarin_h, rho_ballast);
+[V_sparbase, m_sparbase, zc_sparbase_loc, I_xx_sparbase, ~] = segment_frustum(sparbase_D/2, spar_D/2,  spar_h,    rho_wood);
+[V_sparseg,  m_sparseg,  zc_spar_loc,    I_xx_sparseg,  ~] = segment_frustum(spar_D/2,    float_D/2, spartop_h, rho_wood);
+[V_float,    m_float,    zc_float_loc,   I_xx_float,    ~] = segment_cylinder(float_D/2,   float_h,   rho_float);
+
+% Centroid-z för varje segment i sparbojens lokala system (z=0 vid botten)
+zc_ballast  = z0_ballast + zc_ballast_loc;
+zc_sparbase = z0_spar    + zc_sparbase_loc;
+zc_sparseg  = z0_spartop + zc_spar_loc;
+zc_float    = z0_float   + zc_float_loc;
+
+m_spar = m_ballast + m_sparbase + m_sparseg + m_float;
+V_spar = V_ballast + V_sparbase + V_sparseg + V_float;
+
+% Gemensam masscentrum i sparbojens lokala system (från botten)
+zc_spar = (m_ballast*zc_ballast + m_sparbase*zc_sparbase + ...
+           m_sparseg*zc_sparseg  + m_float*zc_float) / m_spar;
+
+% Tröghetsmoment kring sparbojens masscentrum
+I_pitch_spar = steiner(I_xx_ballast,  m_ballast,  zc_ballast  - zc_spar) + ...
+               steiner(I_xx_sparbase, m_sparbase, zc_sparbase - zc_spar) + ...
+               steiner(I_xx_sparseg,  m_sparseg,  zc_sparseg  - zc_spar) + ...
+               steiner(I_xx_float,    m_float,    zc_float    - zc_spar);
+
+A_spar = sumarin_D*sumarin_h + (sparbase_D+spar_D)/2*spar_h + (spar_D+float_D)/2*spartop_h + float_D*float_h;
+
+
+
+% Sparbojens kontur i sparbojens eget system (centrerat kring sparbojens mc)
+% spar_outline_centered returnerar konturen centrerad kring z=0 med
+% botten vid -H_tot/2 och toppen vid +H_tot/2.
+% Sekvens nedifrån: ballast(smal), sparbase(konisk smal→bred), spartop(konisk smal→bred), float(bred)
+horn_spar_local_raw = spar_outline_centered(float_D, float_h, spartop_h, spar_D, sparbase_D, spar_h, sumarin_D, sumarin_h);
+
+% Sparbojens centrum (origo för horn_spar_local_raw) sitter vid z=H_tot/2 räknat från botten.
+% Vi vill ha origo vid sparbojens masscentrum (zc_spar från botten).
+% Offset: mc sitter vid zc_spar från botten = zc_spar - H_tot/2 från geometrisk mitt.
+horn_spar_centred_at_mc = horn_spar_local_raw - [0; zc_spar - H_tot/2];
+
+% Placera sparbojen relativt turbinkroppens centrum:
+% Sparbojens topp ska sitta vid turbinkroppens underkant (z = -hojd_turbin/2).
+% Sparbojens topp i sparbojens mc-system = +H_tot/2 - (zc_spar - H_tot/2) = H_tot - zc_spar
+% Vi vill att den toppen ska hamna vid -hojd_turbin/2 i turbinens system.
+% => offset_z = -hojd_turbin/2 - (H_tot - zc_spar)
+r_spar_mc_in_turbin = [0; -hojd_turbin/2 - (H_tot - zc_spar)];
+horn_spar_local = horn_spar_centred_at_mc + r_spar_mc_in_turbin;
+
+% Masscentrum för sparbojen i turbinens lokala system
+mc_spar_local = r_spar_mc_in_turbin;   % per konstruktion ovan
+
+% --- Rigid kropp: turbinbox + sparboj ---
+m_turbin = m_turbin_box + m_spar;
+
+mc_turbin_local = (m_turbin_box*mc_turbin_box_local + m_spar*mc_spar_local) / m_turbin;
+
+I_turbin = I_turbin_box + m_turbin_box*norm(mc_turbin_box_local - mc_turbin_local)^2 + ...
+           I_pitch_spar  + m_spar      *norm(mc_spar_local       - mc_turbin_local)^2;
+
+A_turbin = diameter_turbin*hojd_turbin + A_spar;
+
+theta_turbin = 0;
+omega_turbin = 0;
+v_turbin     = [0; 0];
+
+%% Bygg struct
+turbin.box.horn  = horn_turbin_box;
+turbin.box.m     = m_turbin_box;
+turbin.box.mc    = mc_turbin_box_local;
+turbin.box.I     = I_turbin_box;
+
+turbin.spar.horn = horn_spar_local;
+turbin.spar.m    = m_spar;
+turbin.spar.mc   = mc_spar_local;
+turbin.spar.I    = I_pitch_spar;
+
+turbin.m         = m_turbin;
+turbin.mc_local  = mc_turbin_local;
+turbin.I         = I_turbin;
+turbin.A         = A_turbin;
+turbin.H_box     = hojd_turbin;
+turbin.D_box     = diameter_turbin;
+turbin.H_spar    = H_tot;
+turbin.D_spar    = float_D;
+
+%% Stabil startposition baserad på sparbojens flytkraft
+
+% Beräkna stabil startposition baserad på sparbojen
+V_spar_nedsankt = m_turbin / p_vatten;                    % volym som behöver vara nedsänkt
+V_spar_per_m    = pi * (D_medel/2)^2;                     % volym per meter nedsänkt höjd
+h_sub           = V_spar_nedsankt / V_spar_per_m;         % nedsänkt höjd av sparbojen
+
+% Sparbojens underkant ska vara på z = -h_sub från ytan
+% r_turbin_z är turbinens origo, sparbojens underkant sitter på:
+% r_turbin_z + horn_spar_local(2,1)
+z_spar_bot_local = horn_spar_local(2, 1);                 % underkant i turbinens lokala system
+r_turbin_z       = -h_sub - z_spar_bot_local;
+r_turbin         = [0; r_turbin_z];
+
+%% Simulering
+h     = 0.001;
+t_max = 100;
+tspan = [0, t_max];
+
+y0 = [r_boj; theta_boj; v_boj; omega_boj; r_turbin; theta_turbin; v_turbin; omega_turbin];
+
+f_handle = @(t, y) ode_f(t, y, V_boj, m_boj, turbin, ...
+                          r_botten, L0_1, L0_2, k, ...
+                          U0, D, U10, b, N_seg, ...
+                          I_pitch_spar, I_turbin_box, m_turbin_box, m_spar, mc_turbin_box_local, mc_turbin_local, mc_spar_local, D_medel,...
+                          A_boj, I_boj,  ...
+                          Cd, p_luft, p_vatten, Cs, horn_boj, mc_boj_local);
+
+[t, y_out] = rk4(f_handle, tspan, y0, h);
+
+x_hist_boj     = y_out(:, 1);
+z_hist_boj     = y_out(:, 2);
+x_hist_turbin  = y_out(:, 7);
+z_hist_turbin  = y_out(:, 8);
+v_hist_turbin  = y_out(:, 10:11);
+theta_hist     = y_out(:, 9);
+theta_boj_hist = y_out(:, 3);
+
+%% Post-processning: krafter
+N = length(t);
+Flin1_hist     = zeros(N, 2);
+Flin2_hist     = zeros(N, 2);
+Fvind_hist     = zeros(N, 2);
+Fstrom_hist    = zeros(N, 2);
+centroid_hist  = zeros(N, 2);
+mc_turbin_hist = zeros(N, 2);
+r_seg_hist = zeros(N, N_seg, 2);
+
+for i = 1:N
+    r_boj_i      = y_out(i, 1:2)';
+    r_turbin_i   = y_out(i, 7:8)';
+    th_boj_i     = y_out(i, 3);
+    th_turb_i    = y_out(i, 9);
+    v_turbin_i   = y_out(i, 10:11)';
+
+    R_b = rot_mat(th_boj_i);
+    R_t = rot_mat(th_turb_i);
+
+    hw_boj  = R_b * horn_boj          + r_boj_i;
+    hw_box  = R_t * turbin.box.horn   + r_turbin_i;
+    hw_spar = R_t * turbin.spar.horn  + r_turbin_i;
+
+    mc_t = r_turbin_i + R_t * turbin.mc_local;
+    mc_turbin_hist(i,:) = mc_t';
+
+    [Fvind_hist(i,:), ~, r_seg_i] = vind_segment(N_seg, hw_box, turbin.D_box, ...
+                                            v_turbin_i, U10, b, th_turb_i, p_luft, Cs, mc_t);
+
+    n = size(r_seg_i, 2);
+    if n > 0
+        r_seg_hist(i, 1:n, :) = r_seg_i';
+    end
+
+    % Linfästen
+    fp_boj_bot  = (hw_boj(:,1) + hw_boj(:,2)) / 2;   % bojens underkant
+    fp_boj_top  = (hw_boj(:,3) + hw_boj(:,4)) / 2;   % bojens överkant
+    fp_spar_bot = (hw_spar(:,1)+hw_spar(:,12))/2;    % Sparbojens underkant (mot bojen)
+    
+    Flin1_hist(i,:) = F_lin(fp_spar_bot, fp_boj_top, L0_1, k)';    % Lina 1: bojens överkant → sparbojens underkant
+    Flin2_hist(i,:) = F_lin(fp_boj_bot, r_botten, L0_2, k)';       % Lina 2: botten → bojens underkant
+
+    [centroid_turbin, ~, ~] = centroid_volym_dragpoint(hw_box, turbin.D_box, turbin.H_box);
+    [centroid_spar, ~, ~] = centroid_volym_dragpoint(hw_spar, turbin.D_spar, turbin.H_spar);
+    centroid_i = centroid_turbin + centroid_spar;
+    centroid_hist(i,:) = centroid_i';
+
+    z_bot_spar = abs(max(0, abs(hw_spar(2, 1))));
+    A_spar_eff = z_bot_spar * D_medel;
+    U_spar     = strom(centroid_spar(2), U0, D);
+    Fdrag_spar = F_drag(U_spar, v_turbin, A_spar_eff, Cd, p_vatten);
+    Fstrom_hist(i,:) = Fdrag_spar;
+
+end
+
+%% Plottar
+figure; plot(t, x_hist_boj,   'b', 'LineWidth', 2); xlabel('Tid [s]'); ylabel('X [m]');  title('Bojens rörelse i X-led');       grid on
+figure; plot(t, z_hist_boj,   'b', 'LineWidth', 2); xlabel('Tid [s]'); ylabel('Z [m]');  title('Bojens rörelse i Z-led');       grid on
+figure; plot(t, x_hist_turbin,'b', 'LineWidth', 2); xlabel('Tid [s]'); ylabel('X [m]');  title('Turbinens rörelse i X-led');    grid on
+figure; plot(t, z_hist_turbin,'b', 'LineWidth', 2); xlabel('Tid [s]'); ylabel('Z [m]');  title('Turbinens rörelse i Z-led');    grid on
+figure; plot(t, v_hist_turbin(:,1),'b','LineWidth',2); xlabel('Tid [s]'); ylabel('v_x [m/s]'); title('Turbinens hastighet i x-led'); grid on
+figure; plot(t, v_hist_turbin(:,2),'b','LineWidth',2); xlabel('Tid [s]'); ylabel('v_z [m/s]'); title('Turbinens hastighet i z-led'); grid on
+figure; plot(t, theta_hist*180/pi,    'b','LineWidth',2); xlabel('Tid [s]'); ylabel('Grader'); title('Turbinens rotation'); grid on
+figure; plot(t, theta_boj_hist*180/pi,'b','LineWidth',2); xlabel('Tid [s]'); ylabel('Grader'); title('Bojens rotation');    grid on
+
+figure
+plot(t, vecnorm(Flin1_hist,2,2), 'r', t, vecnorm(Flin2_hist,2,2), 'b', 'LineWidth', 2)
+xlabel('Tid [s]'); ylabel('Kraft [N]'); legend('|Flin1|','|Flin2|'); title('Linornas kraftmagnitud'); grid on
+
+figure; plot(t, Fvind_hist,  'b','LineWidth',2); xlabel('Tid [s]'); ylabel('F [N]'); title('Vindkraft på turbinen');  grid on
+figure; plot(t, Fstrom_hist, 'b','LineWidth',2); xlabel('Tid [s]'); ylabel('F [N]'); title('Strömkraft på turbinen'); grid on
+
+%% Animation
+N = length(t);
+figure; axis equal; grid on; hold on
+xlim([-30 30]); ylim([-80 30]);
+xl = xlim; yl = ylim;
+patch([xl(1) xl(2) xl(2) xl(1)],[yl(1) yl(1) 0 0],[0.6 0.8 1],'EdgeColor','none','FaceAlpha',0.4);
+xlabel('X [m]'); ylabel('Z [m]'); title('Animation')
+plot(r_botten(1), r_botten(2), 'ks', 'MarkerSize', 10, 'LineWidth', 2)
+
+R0 = eye(2);
+hw_boj0  = R0*horn_boj         + r_boj;
+hw_box0  = R0*turbin.box.horn  + r_turbin;
+hw_spar0 = R0*turbin.spar.horn + r_turbin;
+
+h_boj    = patch(hw_boj0(1,:),  hw_boj0(2,:),  'b', 'FaceAlpha', 0.5);
+h_turbin = patch(hw_box0(1,:),  hw_box0(2,:),  'r', 'FaceAlpha', 0.5);
+h_spar   = patch(hw_spar0(1,:), hw_spar0(2,:), 'm', 'FaceAlpha', 0.4);
+
+fp_boj_bot0  = (hw_boj0(:,1) + hw_boj0(:,2))/2;
+fp_boj_top0  = (hw_boj0(:,3) + hw_boj0(:,4))/2;
+fp_spar_bot0 = (hw_spar0(:,1) + hw_spar0(:,12))/2;
+
+h_line1 = plot([fp_boj_top0(1) fp_spar_bot0(1)], [fp_boj_top0(2) fp_spar_bot0(2)], 'g', 'LineWidth', 2);
+h_line2 = plot([r_botten(1) fp_boj_bot0(1)],     [r_botten(2) fp_boj_bot0(2)],     'g', 'LineWidth', 2);
+h_mc    = plot(0,0,'ko','MarkerSize',6,'MarkerFaceColor','k');
+h_cg    = plot(0,0,'co','MarkerSize',6,'MarkerFaceColor','c');
+h_time  = text(-28, 25, 't = 0.00 s', 'FontSize', 12, 'FontWeight', 'bold');
+h_seg_pts = scatter([], [], 40, 'c', 'filled');
+% h_dragpoint = plot(0, 0, 'mo', 'MarkerSize', 6, 'MarkerFaceColor', 'm');
+
+
+for i = 1:20:N
+    R_t = rot_mat(theta_hist(i));
+    R_b = rot_mat(theta_boj_hist(i));
+
+    hw_b = R_b * horn_boj          + [x_hist_boj(i);    z_hist_boj(i)];
+    hw_x = R_t * turbin.box.horn   + [x_hist_turbin(i); z_hist_turbin(i)];
+    hw_s = R_t * turbin.spar.horn  + [x_hist_turbin(i); z_hist_turbin(i)];
+
+    c1 = force_to_color(Flin1_hist(i,:), max_F);
+    c2 = force_to_color(Flin2_hist(i,:), max_F);
+
+    fp_boj_bot = (hw_b(:,1)+hw_b(:,2))/2;
+    fp_boj_top = (hw_b(:,3)+hw_b(:,4))/2;
+    fp_spar_bot = (hw_s(:,1)+hw_s(:,12))/2;
+
+    r_s = squeeze(r_seg_hist(i, :, :));      % N_seg × 2
+    valid = any(r_s ~= 0, 2);
+    r_s = r_s(valid, :);
+
+    if ~isempty(r_s)
+        set(h_seg_pts, 'XData', r_s(:,1), 'YData', r_s(:,2));
+    else
+        set(h_seg_pts, 'XData', [], 'YData', []);
+    end
+    
+    set(h_line1, 'XData', [fp_boj_top(1) fp_spar_bot(1)], ...
+                 'YData', [fp_boj_top(2) fp_spar_bot(2)], ...
+                 'Color', c1, 'LineWidth', 2);
+    
+    set(h_line2, 'XData', [r_botten(1) fp_boj_bot(1)], ...
+                 'YData', [r_botten(2) fp_boj_bot(2)], ...
+                 'Color', c2, 'LineWidth', 2);
+    set(h_boj,   'XData', hw_b(1,:), 'YData', hw_b(2,:));
+    set(h_turbin,'XData', hw_x(1,:), 'YData', hw_x(2,:));
+    set(h_spar,  'XData', hw_s(1,:), 'YData', hw_s(2,:));
+    set(h_mc,  'XData', mc_turbin_hist(i,1), 'YData', mc_turbin_hist(i,2));
+    set(h_cg,  'XData', centroid_hist(i,1),  'YData', centroid_hist(i,2));
+    set(h_time,'String', sprintf('t = %.2f s', t(i)));
+    drawnow; pause(h*10)
+end
+
+%% ===================== FUNKTIONER =====================
+
+function R = rot_mat(theta)
+    R = [cos(theta), sin(theta); 
+        -sin(theta), cos(theta)];
+end
+
+function color = force_to_color(F, max_F)
+    ratio = min(norm(F)/max_F, 1);
+    if ratio < 0.5
+        color = [ratio/0.5, 1, 0];
+    else
+        color = [1, 1-(ratio-0.5)/0.5, 0];
+    end
+end
+
+function dydt = ode_f(~, y, V_boj, m_boj, turbin, ...
+                      r_botten, L0_1, L0_2, k, U0, D, U10, b, N_seg, ...
+                      I_pitch_spar, I_turbin_box, m_turbin_box, m_spar, mc_turbin_box_local, mc_turbin_local, mc_spar_local, D_medel,...
+                      A_boj, I_boj, ...
+                      Cd, p_luft, p_vatten, Cs, horn_boj, mc_boj_local)
+
+    % --- Boj ---
+    r_boj     = y(1:2)';
+    theta_boj = y(3);
+    v_boj     = y(4:5)';
+    omega_boj = y(6);
+
+    R_b = rot_mat(theta_boj);
+    hbr = R_b * horn_boj;
+
+    % Bojens linfästpunkter
+    fp_boj_bot = r_boj + (hbr(:,1)+hbr(:,2))/2;   % underkant boj → lina till botten och turbin
+    fp_boj_top = r_boj + (hbr(:,3)+hbr(:,4))/2;   % överkant (används ej för linor)
+    mc_boj     = r_boj + R_b * mc_boj_local;
+
+    % --- Turbinpaket ---
+    r_turbin = y(7:8)';
+    theta    = y(9);
+    v_turbin = y(10:11)';
+    omega    = y(12);
+
+    R_t = rot_mat(theta);
+    hw_box  = R_t * turbin.box.horn  + r_turbin;
+    hw_spar = R_t * turbin.spar.horn + r_turbin;
+    mc_turbin = r_turbin + R_t * turbin.mc_local;
+
+    % Turbinens linfäste: överkant på turbinboxen (mot bojen)
+    fp_spar_bot = (hw_spar(:,1)+hw_spar(:,12))/2;
+
+    % --- Linor ---
+    % Lina 1: bojens underkant ↔ turbinboxens överkant
+    Flin_boj_fran_1  = F_lin(fp_boj_top, fp_spar_bot, L0_1, k);   % kraft på boj
+    Flin_turb_fran_1 = -Flin_boj_fran_1;                          % kraft på turbin (N3)
+
+    % Lina 2: botten ↔ bojens underkant
+    Flin_boj_fran_2  = F_lin(fp_boj_bot, r_botten, L0_2, k);     % kraft på boj
+
+
+    % --- Hydrodynamik spar ---
+    [centroid_spar, V_spar_sub, drag_spar] = centroid_volym_dragpoint(hw_spar, turbin.D_spar, turbin.H_spar);
+    z_bot_spar = abs(max(0, abs(hw_spar(2, 1))));
+    A_spar_eff = z_bot_spar * D_medel;
+    U_spar     = strom(centroid_spar(2), U0, D);
+    Fdrag_spar = F_drag(U_spar, v_turbin, A_spar_eff, Cd, p_vatten);
+
+
+    % --- Boj: krafter och moment ---
+    A_boj_eff   = A_boj * abs(cos(theta_boj));
+    U_boj       = strom(r_boj(2), U0, D);
+    Fdrag_boj   = F_drag(U_boj, v_boj, A_boj_eff, Cd, p_vatten);
+    Fflyt_boj   = flyt(V_boj, p_vatten);
+    Ftyngd_boj  = tyngd(m_boj);
+
+    Ftot_boj = Fflyt_boj + Ftyngd_boj + Flin_boj_fran_1 + Flin_boj_fran_2 + Fdrag_boj;
+
+    M_tot_boj = moment(Flin_boj_fran_1, fp_boj_top - mc_boj) + ...
+                moment(Flin_boj_fran_2, fp_boj_bot - mc_boj);
+
+
+    a_boj     = Ftot_boj/m_boj;
+    alpha_boj = M_tot_boj / I_boj;
+
+    % --- Turbinpaket: krafter och moment ---
+    Fflyt_spar    = flyt(V_spar_sub, p_vatten);
+    Ftyngd_turbin = tyngd(turbin.m);
+
+    [F_vind, M_vind, ~] = vind_segment(N_seg, hw_box, turbin.D_box, v_turbin, U10, b, theta, p_luft, Cs, mc_turbin);
+
+    Ftot_turbin = Ftyngd_turbin + Fflyt_spar + ...
+                  Fdrag_spar + Flin_turb_fran_1 + F_vind;
+
+    M_tot = moment(Flin_turb_fran_1, fp_spar_bot   - mc_turbin) + ...
+            moment(Fdrag_spar,        drag_spar   - mc_turbin) + ...
+            moment(Fflyt_spar,        centroid_spar - mc_turbin) + ...
+            M_vind;
+
+    I_turbin = I_turbin_box + m_turbin_box*norm(mc_turbin_box_local - mc_turbin_local)^2 + ...
+           I_pitch_spar  + m_spar      *norm(mc_spar_local       - mc_turbin_local)^2;
+
+
+    a_turbin = Ftot_turbin/(m_spar + m_turbin_box);
+    alpha    = M_tot / I_turbin;
+
+    dydt = [v_boj; omega_boj; a_boj; alpha_boj; v_turbin; omega; a_turbin; alpha];
+    dydt = dydt(:)';
+end
+
+function Ftyngd = tyngd(m);   g = 9.82; Ftyngd = [0; -m*g]; end
+function Fflyt  = flyt(V, p); g = 9.82; Fflyt  = [0;  p*g*V]; end
+
+function Fdrag = F_drag(U, v, A, Cd, p)
+    vr = U - v;
+    Fdrag = 0.5 * p * A * Cd * norm(vr) .* vr;
+end
+
+function Flin = F_lin(r1, r0, L0, k)
+    d = r1(:) - r0(:);
+    L = norm(d);
+    if L == 0; Flin = [0;0]; return; end
+    ext = L - L0;
+    T = k * max(ext, 0);
+    % c = 5e3;
+    % if ext > 0; T = T + c*ext; end
+    Flin = -T * (d/L);
+end
+
+function M = moment(F, r)
+    M = F(1)*r(2) - F(2)*r(1);
+end
+
+function [centroid, volym, drag_point] = centroid_volym_dragpoint(horn_varld, diameter, hojd)
+    pts  = [];
+    Nv   = size(horn_varld, 2);
+    for i = 1:Nv
+        p1 = horn_varld(:, i);
+        p2 = horn_varld(:, mod(i,Nv)+1);
+        z1 = p1(2); z2 = p2(2);
+        if z1 < 0; pts = [pts, p1]; end
+        if (z1<0 && z2>0)||(z1>0 && z2<0)
+            ti = z1/(z1-z2);
+            pts = [pts, p1+ti*(p2-p1)];
+        end
+    end
+    if isempty(pts)
+        centroid=[0;0]; volym=0; drag_point=[NaN;NaN]; return
+    end
+    x = pts(1,:); z = pts(2,:);
+    A=0; Cx=0; Cz=0;
+    for i = 1:length(x)
+        j  = mod(i,length(x))+1;
+        cr = x(i)*z(j)-x(j)*z(i);
+        A=A+cr; Cx=Cx+(x(i)+x(j))*cr; Cz=Cz+(z(i)+z(j))*cr;
+    end
+    A = A/2;
+    andel = abs(A/(diameter*hojd));
+    volym = pi*hojd*(diameter/2)^2*andel;
+    if A==0; centroid=mean(pts,2);
+    else;    centroid=[Cx/(6*A); Cz/(6*A)]; end
+    xf = min(pts(1,:));
+    fp = pts(:, abs(pts(1,:)-xf)<1e-6);
+    if isempty(fp); drag_point=[xf; centroid(2)];
+    else;           drag_point=[mean(fp(1,:)); centroid(2)]; end
+end
+
+function [Fv, Mv, r_seg] = vind_segment(N_seg, horn_varld, diameter, v, U10, b, theta, p_luft, Cs, mc)
+    Fv=zeros(2,1); Mv=0; r_seg=[];
+    if U10>=0; iA=1; iB=4; else; iA=2; iB=3; end
+    pA=horn_varld(:,iA); pB=horn_varld(:,iB);
+    if pA(2)>=pB(2); xt=pA(1);zt=pA(2);xb=pB(1);zb=pB(2);
+    else;             xt=pB(1);zt=pB(2);xb=pA(1);zb=pA(2); end
+    if zt<=0; return; end
+    if zb<0; tc=(0-zb)/(zt-zb); xb=xb+tc*(xt-xb); zb=0; end
+    dz=(zt-zb)/N_seg;
+    for i=1:N_seg
+        zm   = zb+(i-0.5)*dz;
+        tl   = (zm-zb)/(zt-zb);
+        xv   = xb+tl*(xt-xb);
+        Us   = vind(zm,U10,b);
+        dA   = dz*diameter;
+        dF   = F_drag(Us,v,dA,Cs,p_luft);
+        ri   = [xv;zm];
+        r_seg= [r_seg,ri];
+        Fv   = Fv+dF;
+        Mv   = Mv+moment(dF,ri-mc);
+    end
+end
+
+
+function U = strom(z, U0, D); U = [U0*exp(z/D); 0]; end
+
+function U = vind(z, U10, b)
+    zs = max(z,0);
+    U  = [U10*(zs/10)^b; 0];
+end
+
+function [V,m,zc,I_xx,I_zz] = segment_cylinder(R,h,rho)
+    V=pi*R^2*h; m=rho*V; zc=h/2;
+    I_xx=m/12*(3*R^2+h^2); I_zz=m/2*R^2;
+end
+
+function [V,m,zc,I_xx,I_zz] = segment_frustum(R_bot,R_top,h,rho)
+    V  = pi*h/3*(R_bot^2+R_bot*R_top+R_top^2);
+    m  = rho*V;
+    zc = h/4*(R_bot^2+2*R_bot*R_top+3*R_top^2)/(R_bot^2+R_bot*R_top+R_top^2);
+    Rm = (R_bot+R_top)/2;
+    I_xx = m/12*(3*Rm^2+h^2);
+    I_zz = m/2*(R_bot^2+R_top^2)/2;
+end
+
+function I = steiner(I_mc,m,d); I=I_mc+m*d^2; end
+
+% Sparbojens kontur centrerad kring geometrisk mitt (z=0 vid H_tot/2 från botten)
+% Nedifrån: ballast (smal) → sparbase (konisk) → spartop (konisk) → float (bred)
+function horn = spar_outline_centered(float_D, float_h, spartop_h, spar_D, sparbase_D, spar_h, sumarin_D, sumarin_h)
+    H = sumarin_h + spar_h + spartop_h + float_h;
+    % z-nivåer nedifrån (centrerade: botten = -H/2)
+    z0 = -H/2;
+    z1 = z0 + sumarin_h;     % topp på ballast   = botten på sparbase
+    z2 = z1 + spar_h;        % topp på sparbase  = botten på spartop
+    z3 = z2 + spartop_h;     % topp på spartop   = botten på float
+    z4 = z3 + float_h;       % topp på float     = +H/2
+
+    % Radier vid varje z-nivå (nedifrån)
+    r0 = sumarin_D/2;    % botten ballast
+    r1 = sparbase_D/2;    % topp ballast / botten sparbase
+    r2 = spar_D/2;       % topp sparbase / botten spartop   (sparbase: smal→bred)
+    r3 = float_D/2;      % topp spartop / botten float      (spartop:  smal→bred)
+    r4 = float_D/2;      % topp float
+
+    % Kontur medurs (vänster sida uppåt, höger sida nedåt)
+    % Vänster sida (x negativ), nedifrån och upp:
+    x_left  = [-r0, -r0, -r1, -r2, -r3, -r4];
+    z_left  = [ z0,  z1,  z1,  z2,  z3,  z4];
+    % Höger sida (x positiv), uppifrån och ned:
+    x_right = [ r4, r3, r2, r1, r0, r0];
+    z_right = [ z4, z3, z2, z1, z1, z0];
+
+    horn = [x_left, x_right; z_left, z_right];
+end
+
+function D_medel = medel_diameter_spar(float_D, float_h, spartop_h, spar_D, sparbase_D, spar_h, sumarin_D, sumarin_h)
+    % Beräknar volymviktad medeldiameter för sparbojen
+    % Varje segment viktas med sin höjd (areal-medelvärde längs z-axeln)
+
+    % Segment 1: Ballast (cylinder)
+    h1 = sumarin_h;
+    D1 = sumarin_D;
+
+    % Segment 2: Sparbase (frustum, sparbase_D → spar_D)
+    h2   = spar_h;
+    D2   = (sparbase_D + spar_D) / 2;   % medel av frustumets diametrar
+
+    % Segment 3: Spartop (frustum, spar_D → float_D)
+    h3   = spartop_h;
+    D3   = (spar_D + float_D) / 2;
+
+    % Segment 4: Float (cylinder)
+    h4 = float_h;
+    D4 = float_D;
+
+    H_tot  = h1 + h2 + h3 + h4;
+    D_medel = (D1*h1 + D2*h2 + D3*h3 + D4*h4) / H_tot;
+
+end
+
+
+function [t,y] = rk4(f, tspan, y0, h)
+    n = floor((tspan(2)-tspan(1))/h);
+    m = length(y0);
+    t = zeros(n+1,1); y = zeros(n+1,m);
+    t(1)=tspan(1); y(1,:)=y0(:)';
+    for i=1:n
+        k1=f(t(i),        y(i,:));
+        k2=f(t(i)+0.5*h,  y(i,:)+0.5*h*k1);
+        k3=f(t(i)+0.5*h,  y(i,:)+0.5*h*k2);
+        k4=f(t(i)+h,      y(i,:)+h*k3);
+        y(i+1,:)=y(i,:)+h/6*(k1+2*k2+2*k3+k4);
+        t(i+1)=t(i)+h;
+    end
+end
