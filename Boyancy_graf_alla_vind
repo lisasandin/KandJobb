@@ -1,0 +1,298 @@
+clear; clc; close all;
+
+%% Data
+F_buoy = [
+    6.6702e6
+    5.4231e6
+    4.8626e6
+    4.3421e6
+    3.8601e6
+    3.4151e6
+    3.0058e6
+    2.6305e6
+    1.9764e6
+    1.4408e6
+];
+
+F_buoy_MN = F_buoy / 1e6;
+
+%% =========================
+% U10 = 5 m/s
+%% =========================
+
+theta_5 = [
+    2.835
+    2.827
+    2.823
+    2.819
+    2.815
+    2.812
+    2.808
+    2.804
+    2.796
+    2.780
+];
+
+x_turbin_5 = [
+    121.458
+    124.560
+    126.349
+    128.555
+    131.445
+    135.388
+    140.924
+    148.897
+    178.986
+    262.414
+];
+
+FLin_5 = [
+    5689834.264
+    4449511.832
+    3892179.422
+    3374802.605
+    2895929.205
+    2454108.517
+    2047898.305
+    1675879.128
+    1029125.444
+    508493.077
+];
+
+%% =========================
+% U10 = 10 m/s
+%% =========================
+
+theta_10 = [
+    14.438
+    14.259
+    13.942
+    13.856
+    13.765
+    13.448
+    13.318
+    13.249
+    12.297
+    10.873
+];
+
+x_turbin_10 = [
+    197.114
+    215.421
+    224.893
+    238.570
+    255.246
+    272.968
+    298.266
+    329.405
+    400.110
+    450.014
+];
+
+FLin_10 = [
+    5703514.352
+    4488962.982
+    3943352.964
+    3439452.842
+    2975307.478
+    2547875.464
+    2168229.340
+    1803014.003
+    1261844.522
+    976380.668
+];
+
+%% =========================
+% U10 = 15 m/s
+%% =========================
+
+theta_15 = [
+    43.011
+    40.150
+    38.535
+    36.844
+    35.073
+    33.185
+    31.073
+    29.418
+    25.139
+    21.947
+];
+
+x_turbin_15 = [
+    446.924
+    487.325
+    506.669
+    525.209
+    541.997
+    556.008
+    564.068
+    570.108
+    574.553
+    575.011
+];
+
+FLin_15 = [
+    5998159.757
+    4935014.977
+    4474511.574
+    4065164.994
+    3708766.735
+    3403549.141
+    3121922.624
+    2898181.387
+    2539228.177
+    2271863.987
+];
+
+%% =========================
+% Lin1 forces
+%% =========================
+
+FLin1_5 = [
+    49991.218
+    51386.417
+    52324.196
+    53412.294
+    56062.280
+    54652.745
+    50604.852
+    56062.280
+    68376.167
+];
+
+FLin1_10 = [
+    223732.266
+    227469.615
+    231392.961
+    237180.302
+    240590.292
+    253743.231
+    256688.348
+    325961.717
+    536074.630
+];
+
+FLin1_15 = [
+    924638.435
+    958995.994
+    987636.140
+    1030530.659
+    1092163.133
+    1173954.097
+    1251379.636
+    1364526.664
+    1598911.310
+];
+
+FLin1_5_MN  = FLin1_5 / 1e6;
+FLin1_10_MN = FLin1_10 / 1e6;
+FLin1_15_MN = FLin1_15 / 1e6;
+
+%% ============================================
+% FIGURE 1 - Lin1 force (MN)
+%% ============================================
+
+figure;
+
+plot(F_buoy_MN(1:length(FLin1_5_MN)), FLin1_5_MN,'-o','LineWidth',2,'MarkerSize',7)
+hold on
+plot(F_buoy_MN(1:length(FLin1_10_MN)), FLin1_10_MN,'-s','LineWidth',2,'MarkerSize',7)
+plot(F_buoy_MN(1:length(FLin1_15_MN)), FLin1_15_MN,'-^','LineWidth',2,'MarkerSize',7)
+
+grid on
+box on
+
+xlabel('$F_{buoyancy}$ [MN]','Interpreter','latex')
+ylabel('$F_{Lin1}$ [MN]','Interpreter','latex')
+
+legend('$U_{10}=5$ m/s', ...
+       '$U_{10}=10$ m/s', ...
+       '$U_{10}=15$ m/s', ...
+       'Interpreter','latex', ...
+       'Location','best')
+
+set(gca,'FontSize',14)
+
+exportgraphics(gcf,'Lin1Force.png','Resolution',300)
+
+%% ============================================
+% FIGURE 2 - Mooring line force (MN)
+%% ============================================
+
+figure;
+
+plot(F_buoy_MN, FLin_5/1e6,'-o','LineWidth',2,'MarkerSize',7)
+hold on
+plot(F_buoy_MN, FLin_10/1e6,'-s','LineWidth',2,'MarkerSize',7)
+plot(F_buoy_MN, FLin_15/1e6,'-^','LineWidth',2,'MarkerSize',7)
+
+grid on
+box on
+
+xlabel('$F_{buoyancy}$ [MN]','Interpreter','latex')
+ylabel('$F_{Line}$ [MN]','Interpreter','latex')
+
+legend('$U_{10}=5$ m/s', ...
+       '$U_{10}=10$ m/s', ...
+       '$U_{10}=15$ m/s', ...
+       'Interpreter','latex', ...
+       'Location','best')
+
+set(gca,'FontSize',14)
+
+exportgraphics(gcf,'LineForce.png','Resolution',300)
+
+%% ============================================
+% FIGURE 3 - Turbine angle
+%% ============================================
+
+figure;
+
+plot(F_buoy_MN, theta_5,'-o','LineWidth',2,'MarkerSize',7)
+hold on
+plot(F_buoy_MN, theta_10,'-s','LineWidth',2,'MarkerSize',7)
+plot(F_buoy_MN, theta_15,'-^','LineWidth',2,'MarkerSize',7)
+
+grid on
+box on
+
+xlabel('$F_{buoyancy}$ [MN]','Interpreter','latex')
+ylabel('$\theta_{turbine}$ [deg]','Interpreter','latex')
+
+legend('$U_{10}=5$ m/s', ...
+       '$U_{10}=10$ m/s', ...
+       '$U_{10}=15$ m/s', ...
+       'Interpreter','latex', ...
+       'Location','best')
+
+set(gca,'FontSize',14)
+
+exportgraphics(gcf,'TurbineAngle.png','Resolution',300)
+
+%% ============================================
+% FIGURE 4 - Turbine x-position
+%% ============================================
+
+figure;
+
+plot(F_buoy_MN, x_turbin_5,'-o','LineWidth',2,'MarkerSize',7)
+hold on
+plot(F_buoy_MN, x_turbin_10,'-s','LineWidth',2,'MarkerSize',7)
+plot(F_buoy_MN, x_turbin_15,'-^','LineWidth',2,'MarkerSize',7)
+
+grid on
+box on
+
+xlabel('$F_{buoyancy}$ [MN]','Interpreter','latex')
+ylabel('$x_{turbine}$ [m]','Interpreter','latex')
+
+legend('$U_{10}=5$ m/s', ...
+       '$U_{10}=10$ m/s', ...
+       '$U_{10}=15$ m/s', ...
+       'Interpreter','latex', ...
+       'Location','best')
+
+set(gca,'FontSize',14)
+
+exportgraphics(gcf,'TurbineXPosition.png','Resolution',300)
